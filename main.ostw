@@ -1,0 +1,741 @@
+import "settings.lobby";
+
+import "OSTWUtils/OnScreenText.del";
+import "OSTWUtils/Math.del";
+
+globalvar HeroAbility[] ability1Heroes = import("heroAbilityData.json").ability1Heroes;
+globalvar HeroAbility[] ability2Heroes = import("heroAbilityData.json").ability2Heroes;
+globalvar HeroAbility[] ultimateHeroes = import("heroAbilityData.json").ultimateHeroes;
+globalvar String[] modifiers = import("heroAbilityData.json").modifiers;
+
+globalvar Number currentIndex;
+globalvar Number currentAngularSpeed;
+globalvar Number outstandingAngularBalance = 0.5;
+globalvar Number randomSlowIndex;
+globalvar Boolean frictionEnabled;
+globalvar Boolean slowPanFlag;
+
+globalvar Vector cameraPos = Up() * 3;
+globalvar Vector cameraFacing = Normalize(Forward() + 0.085 * Down());
+globalvar Vector cameraXAxis;
+globalvar Vector cameraYAxis;
+
+globalvar Number[] wheelTexts = [];
+
+globalvar Number i 120;
+
+struct HeroAbility {
+  public Hero hero;
+  public String abilityName;
+}
+
+enum WheelType {
+  Hero,
+  Ability1,
+  Ability2,
+  Ultimate,
+  Modifier
+}
+String WheelTypeName(Number wheelType): ["", "Hero", "Ability 1", "Ability 2", "Ultimate", "Modifier"][<Number>wheelType + 1];
+
+globalvar WheelType currentWheel = WheelType.Hero;
+Player[] visibleToPlayersOnly(Boolean visibilityCondition = true): AllPlayers().Contains(LocalPlayer()) && visibilityCondition ? AllPlayers() : null;
+
+rule: "global setup"
+{
+  # Set some camera constants
+  cameraXAxis = Math.WorldVectorForPositionWithPitch(Right(), cameraPos, cameraFacing, false);
+  cameraYAxis = Math.WorldVectorForPositionWithPitch(Up(), cameraPos, cameraFacing, false);
+  LogToInspector(cameraPos);
+  LogToInspector(cameraFacing);
+  LogToInspector(cameraXAxis);
+  LogToInspector(cameraYAxis);
+
+  WaitUntil(IsGameInProgress(), 10);
+  PauseMatchTime();
+  LoadNewWheel();
+
+  # DEBUG
+  // CreateHudText(
+  //   AllPlayers(),
+  //   Text: $"Index: {currentIndex}                                                                              ",
+  //   Location: Location.Left,
+  //   Reevaluation: HudTextRev.VisibleToAndString,
+  //   SortOrder: 1
+  // );
+  // CreateHudText(
+  //   AllPlayers(),
+  //   Text: $"Speed: {currentAngularSpeed}                                                                              ",
+  //   Location: Location.Left,
+  //   Reevaluation: HudTextRev.VisibleToAndString,
+  //   SortOrder: 2
+  // );
+  // CreateHudText(
+  //   AllPlayers(),
+  //   Text: $"Balance: {outstandingAngularBalance}                                                                              ",
+  //   Location: Location.Left,
+  //   Reevaluation: HudTextRev.VisibleToAndString,
+  //   SortOrder: 3
+  // );
+  // CreateHudText(
+  //   AllPlayers(),
+  //   Text: $"Friction: {frictionEnabled ? 'True' : 'False'}                                                                              ",
+  //   Location: Location.Left,
+  //   Reevaluation: HudTextRev.VisibleToAndString,
+  //   SortOrder: 4
+  // );
+  // CreateHudText(
+  //   AllPlayers(),
+  //   Text: $"Slow Pan: {slowPanFlag ? 'True' : 'False'}                                                                              ",
+  //   Location: Location.Left,
+  //   Reevaluation: HudTextRev.VisibleToAndString,
+  //   SortOrder: 5
+  // );
+
+  # Camera backdrop
+  CreateEffect(AllPlayers(), Effect.Orb, Color.Black, cameraPos + -0.33 * cameraFacing, 1, EffectRev.VisibleToPositionAndRadius);
+
+  # Instructions
+  CreateInWorldText(
+    HostPlayer(),
+    <"<0> Spin   |   Stop <1>", InputBindingString(Button.PrimaryFire), InputBindingString(Button.SecondaryFire)>,
+    Math.WorldVectorForPositionWithPitch(Vector(100 * 0, 100 * (-0.8 - 0.2), 300), cameraPos, cameraFacing, true),
+    Scale: 2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White,
+    Spectators.VisibleNever
+  );
+
+  # Wheel title
+  CreateInWorldText(
+    visibleToPlayersOnly(),
+    WheelTypeName(<Number>currentWheel),
+    Math.WorldVectorForPositionWithPitch(Vector(100 * 0, 100 * (1.5 - 0.2), 300), cameraPos, cameraFacing, true),
+    Scale: 4,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.Yellow,
+    Spectators.VisibleNever
+  );
+
+  # Previous wheel
+  CreateInWorldText(
+    visibleToPlayersOnly(currentWheel > WheelType.Hero),
+    IconString(Icon.ArrowLeft),
+    Math.WorldVectorForPositionWithPitch(Vector(-3 * 100, 100 * (0.1 - 0.2), 300), cameraPos, cameraFacing, true),
+    Scale: 4,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White,
+    Spectators.VisibleNever
+  );
+  CreateInWorldText(
+    visibleToPlayersOnly(currentWheel > WheelType.Hero),
+    WheelTypeName(<Number>currentWheel - 1),
+    Math.WorldVectorForPositionWithPitch(Vector(-3 * 100, 100 * (-0.1 - 0.2), 300), cameraPos, cameraFacing, true),
+    Scale: 2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White,
+    Spectators.VisibleNever
+  );
+  # Next wheel
+  CreateInWorldText(
+    visibleToPlayersOnly(currentWheel != WheelType.Modifier),
+    IconString(Icon.ArrowRight),
+    Math.WorldVectorForPositionWithPitch(Vector(3 * 100, 100 * (0.1 - 0.2), 300), cameraPos, cameraFacing, true),
+    Scale: 4,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White,
+    Spectators.VisibleNever
+  );
+  CreateInWorldText(
+    visibleToPlayersOnly(currentWheel != WheelType.Modifier),
+    WheelTypeName(<Number>currentWheel + 1),
+    Math.WorldVectorForPositionWithPitch(Vector(3 * 100, 100 * (-0.1 - 0.2), 300), cameraPos, cameraFacing, true),
+    Scale: 2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White,
+    Spectators.VisibleNever
+  );
+}
+
+rule: "player setup"
+Event.OngoingPlayer
+if (IsGameInProgress())
+{
+  while (!HasSpawned()) {
+    ForcePlayerHero(EventPlayer(), Hero.Echo);
+    Wait(0.25);
+  }
+  StopForcingHero(EventPlayer());
+  DisableScoreboard(EventPlayer());
+  StartFacing(EventPlayer(), Forward(), 1000, Relative.ToWorld, FacingRev.None);
+  StartForcingPlayerPosition(EventPlayer(), Up() * 100, false);
+  SetInvisible(EventPlayer(), InvisibleTo.All);
+  SetAbility1Enabled(EventPlayer(), false);
+  SetAbility2Enabled(EventPlayer(), false);
+  SetUltimateAbilityEnabled(EventPlayer(), false);
+  SetPrimaryFireEnabled(EventPlayer(), false);
+  SetSecondaryFireEnabled(EventPlayer(), false);
+  DisallowButton(EventPlayer(), Button.Jump);
+  DisallowButton(EventPlayer(), Button.Crouch);
+
+  StartCamera(EventPlayer(), cameraPos, cameraPos + cameraFacing, 0);
+  DisableGameModeHud(EventPlayer());
+  DisableHeroHud(EventPlayer());
+}
+
+rule: "When primary fire pressed, start spinning the wheel"
+Event.OngoingGlobal
+if (HostPlayer().IsButtonHeld(Button.PrimaryFire))
+{
+  slowPanFlag = false;
+  currentAngularSpeed = 25;
+  frictionEnabled = false;
+  WaitUntil(!HostPlayer().IsButtonHeld(Button.PrimaryFire), 1);
+  randomSlowIndex = RandomInteger(0, ability1Heroes.Length - 1);
+  WaitUntil(currentIndex == randomSlowIndex, 2);
+  frictionEnabled = true;
+}
+
+rule: "When secondary fire pressed, immediately stop the wheel"
+Event.OngoingGlobal
+if (HostPlayer().IsButtonHeld(Button.SecondaryFire))
+{
+  SmallMessage(AllPlayers(), $" {IconString(Icon.Warning)}  Wheel was manually stopped");
+  currentAngularSpeed = 0;
+}
+
+rule: "When throttle left, select previous wheel"
+Event.OngoingGlobal
+if (currentWheel > WheelType.Hero)
+if (XOf(ThrottleOf(HostPlayer())) > 0.5)
+{
+  currentWheel--;
+  async LoadNewWheel();
+}
+
+rule: "When throttle right, select next wheel"
+Event.OngoingGlobal
+if (currentWheel < WheelType.Modifier)
+if (XOf(ThrottleOf(HostPlayer())) < -0.5)
+{
+  currentWheel++;
+  async LoadNewWheel();
+}
+
+void LoadNewWheel() "Load new wheel visuals"
+{
+  StopChasingVariable(currentAngularSpeed);
+  foreach (Number textId in wheelTexts) {
+    DestroyInWorldText(textId);
+  }
+  wheelTexts = [];
+  slowPanFlag = true;
+  currentIndex = 0;
+  outstandingAngularBalance = 0;
+
+  if (currentWheel == WheelType.Hero) {
+    CreateHeroWheel();
+  }
+
+  if (currentWheel == WheelType.Ability1) {
+    // currentIndex = RandomInteger(0, ability1Heroes.Length - 1);
+    CreateAbility1Wheel();
+  }
+
+  if (currentWheel == WheelType.Ability2) {
+    // currentIndex = RandomInteger(0, ability2Heroes.Length - 1);
+    CreateAbility2Wheel();
+  }
+
+  if (currentWheel == WheelType.Ultimate) {
+    CreateUltimateWheel();
+  }
+
+  if (currentWheel == WheelType.Modifier) {
+    CreateModifierWheel();
+  }
+
+  # Force client to re-sync balance
+  Wait(0.064);
+  outstandingAngularBalance = outstandingAngularBalance;
+}
+
+Number ANGULAR_FRICTION: 0.5;
+Number MINIMUM_FRICTION_VELOCITY: 0.5;
+Number UPDATE_FREQUENCY: 0.032;
+Number EPSILON: 0.05;
+
+rule: "Wheel index calculations"
+if (currentAngularSpeed > 0)
+{
+  // outstandingAngularBalance += currentAngularSpeed * UPDATE_FREQUENCY;
+  // Wait(UPDATE_FREQUENCY, WaitBehavior.AbortWhenFalse);
+  // Loop();
+
+  ChaseVariableAtRate(outstandingAngularBalance, 100, currentAngularSpeed, RateChaseReevaluation.DestinationAndRate);
+}
+
+globalvar Any spinSoundEffect;
+
+rule: "Process ticking over to a new section"
+# We need to loop instead of using a condition because Workshop bugs
+if (currentAngularSpeed > 0)
+{
+  if (outstandingAngularBalance >= 1) {
+    currentIndex += RoundToInteger(outstandingAngularBalance, Rounding.Down);
+    outstandingAngularBalance = outstandingAngularBalance % 1;
+
+    if (!slowPanFlag) {
+      PlayEffect(AllPlayers(), PlayEffect.Soldier76SprintStartSound, Color.White, cameraPos, 200);
+      PlayEffect(AllPlayers(), PlayEffect.DvaMicroMissilesExplosionSound, Color.White, cameraPos, 10);
+    }
+    ClampWheelIndex();
+  }
+
+  MinWait();
+  LoopIfConditionIsTrue();
+}
+
+rule: "Slow angular speed down every tick"
+if (frictionEnabled)
+if (currentAngularSpeed > 0)
+{
+  # We have to pull this number out of the chase because otherwise the client and server will disagree.
+  Number randomScalar = RandomReal(0.8, 1.2);
+  ChaseVariableAtRate(currentAngularSpeed, 0, (frictionEnabled ? randomScalar : 0) * ANGULAR_FRICTION * Max(currentAngularSpeed, MINIMUM_FRICTION_VELOCITY), RateChaseReevaluation.DestinationAndRate);
+  WheelType tempWheelType = currentWheel;
+  WaitUntil(currentAngularSpeed < EPSILON || currentWheel != tempWheelType, 60);
+  AbortIf(tempWheelType != currentWheel);
+  currentAngularSpeed = 0;
+  StopChasingVariable(currentAngularSpeed);
+}
+
+rule: "When spin is complete, snap the wheel to the selected choice"
+if (currentAngularSpeed > 0)
+{
+  WaitUntil(currentAngularSpeed == 0, 1000);
+  StopChasingVariable(currentAngularSpeed);
+  Wait(0.2, WaitBehavior.RestartWhenTrue);
+  StopChasingVariable(outstandingAngularBalance);
+  ChaseVariableAtRate(outstandingAngularBalance, 0.5, 2 * 2 * AbsoluteValue(0.5 - outstandingAngularBalance), RateChaseReevaluation.DestinationAndRate);
+  WaitUntil(AbsoluteValue(outstandingAngularBalance - 0.5) < 0.005 || currentAngularSpeed > 0, 2);
+  LoopIfConditionIsTrue();
+  StopChasingVariable(outstandingAngularBalance);
+}
+
+rule: "If slowPanFlag is enabled, set a slow angular speed and disable friction"
+if (slowPanFlag)
+{
+  MinWait();
+  AbortIfConditionIsFalse();
+  frictionEnabled = false;
+  currentAngularSpeed = 0.67;
+}
+
+void ClampWheelIndex() "[SUB] Clamp wheel index"
+{
+  if (currentWheel == WheelType.Hero) {
+    if (currentIndex >= AllHeroes().Length) currentIndex = currentIndex % AllHeroes().Length;
+    return;
+  }
+
+  if (currentWheel == WheelType.Ability1) {
+    if (currentIndex >= ability1Heroes.Length) currentIndex = currentIndex % ability1Heroes.Length;
+    return;
+  }
+
+  if (currentWheel == WheelType.Ability2) {
+    if (currentIndex >= ability2Heroes.Length) currentIndex = currentIndex % ability2Heroes.Length;
+    return;
+  }
+
+  if (currentWheel == WheelType.Ultimate) {
+    if (currentIndex >= ultimateHeroes.Length) currentIndex = currentIndex % ultimateHeroes.Length;
+    return;
+  }
+
+  if (currentWheel == WheelType.Modifier) {
+    if (currentIndex >= modifiers.Length) currentIndex = currentIndex % modifiers.Length;
+    return;
+  }
+}
+
+Number SPIN_OFFSET_SCALAR: 1.2;
+Number WHEEL_DISPLAY_DISTANCE: 8;
+Number SELECTION_SCALE: 4;
+Number FILLER_SCALE: 3.5;
+Number FILLERS_EACH_SIDE: 4;
+Number FADE_LENGTH: 2;
+Number clampedIndex(Number index, Number base): ((index % base) + base) % base;
+
+void CreateHeroWheel() "Create the Hero wheel" {
+  # arrow
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    IconString(Icon.ArrowUp),
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.1, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+  # hero name
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    AllHeroes()[currentIndex],
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.35, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+
+  # Main selection icon
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    <"<0>\n", HeroIconString(AllHeroes()[currentIndex])>,
+    UpdateEveryFrame(cameraPos
+      + WHEEL_DISPLAY_DISTANCE * cameraFacing
+      + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - 0.5)),
+    SELECTION_SCALE,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString
+  ));
+
+  # left side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n", HeroIconString(AllHeroes()[clampedIndex(currentIndex - EvaluateOnce(i + 1), AllHeroes().Length)])>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance + (EvaluateOnce(i) + 0.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - EvaluateOnce(i) - outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+
+  # right side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n", HeroIconString(AllHeroes()[clampedIndex(currentIndex + EvaluateOnce(i + 1), AllHeroes().Length)])>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - EvaluateOnce(i + 1.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - 1 - EvaluateOnce(i) + outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+}
+
+void CreateAbility1Wheel() "Create Ability 1 wheel" {
+  # arrow
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    IconString(Icon.ArrowUp),
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.45, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+  # ability name
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    ability1Heroes[currentIndex].abilityName,
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.7, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+
+  # main selection icon
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    <"<0>\n\n<1>", HeroIconString(ability1Heroes[currentIndex].hero), AbilityIconString(ability1Heroes[currentIndex].hero, Button.Ability1)>,
+    UpdateEveryFrame(cameraPos
+      + WHEEL_DISPLAY_DISTANCE * cameraFacing
+      + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - 0.5)),
+    SELECTION_SCALE,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString
+  ));
+
+  # left side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n\n<1>",
+        HeroIconString(ability1Heroes[clampedIndex(currentIndex - EvaluateOnce(i + 1), ability1Heroes.Length)].hero),
+        AbilityIconString(ability1Heroes[clampedIndex(currentIndex - EvaluateOnce(i + 1), ability1Heroes.Length)].hero, Button.Ability1)>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance + (EvaluateOnce(i) + 0.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - EvaluateOnce(i) - outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+
+  # right side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n\n<1>",
+        HeroIconString(ability1Heroes[clampedIndex(currentIndex + EvaluateOnce(i + 1), ability1Heroes.Length)].hero),
+        AbilityIconString(ability1Heroes[clampedIndex(currentIndex + EvaluateOnce(i + 1), ability1Heroes.Length)].hero, Button.Ability1)>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - EvaluateOnce(i + 1.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - 1 - EvaluateOnce(i) + outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+}
+
+void CreateAbility2Wheel() "Create Ability 2 wheel" {
+  # arrow
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    IconString(Icon.ArrowUp),
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.45, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+  # ability name
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    ability2Heroes[currentIndex].abilityName,
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.7, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+
+  # main selection icon
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    <"<0>\n\n<1>", HeroIconString(ability2Heroes[currentIndex].hero), AbilityIconString(ability2Heroes[currentIndex].hero, Button.Ability2)>,
+    UpdateEveryFrame(cameraPos
+      + WHEEL_DISPLAY_DISTANCE * cameraFacing
+      + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - 0.5)),
+    SELECTION_SCALE,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString
+  ));
+
+  # left side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n\n<1>",
+        HeroIconString(ability2Heroes[clampedIndex(currentIndex - EvaluateOnce(i + 1), ability2Heroes.Length)].hero),
+        AbilityIconString(ability2Heroes[clampedIndex(currentIndex - EvaluateOnce(i + 1), ability2Heroes.Length)].hero, Button.Ability2)>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance + (EvaluateOnce(i) + 0.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - EvaluateOnce(i) - outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+
+  # right side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n\n<1>",
+        HeroIconString(ability2Heroes[clampedIndex(currentIndex + EvaluateOnce(i + 1), ability2Heroes.Length)].hero),
+        AbilityIconString(ability2Heroes[clampedIndex(currentIndex + EvaluateOnce(i + 1), ability2Heroes.Length)].hero, Button.Ability2)>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - EvaluateOnce(i + 1.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - 1 - EvaluateOnce(i) + outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+}
+
+void CreateUltimateWheel() "Create Ultimate wheel" {
+  # arrow
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    IconString(Icon.ArrowUp),
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.45, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+  # ability name
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    ultimateHeroes[currentIndex].abilityName,
+    UpdateEveryFrame(Math.WorldVectorForPositionWithPitch(Vector(0, WHEEL_DISPLAY_DISTANCE/3 * -0.7, WHEEL_DISPLAY_DISTANCE), cameraPos, cameraFacing, true)),
+    2.5,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.White
+  ));
+
+  # main selection icon
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    <"<0>\n\n<1>", HeroIconString(ultimateHeroes[currentIndex].hero), AbilityIconString(ultimateHeroes[currentIndex].hero, Button.Ultimate)>,
+    UpdateEveryFrame(cameraPos
+      + WHEEL_DISPLAY_DISTANCE * cameraFacing
+      + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - 0.5)),
+    SELECTION_SCALE,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString
+  ));
+
+  # left side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n\n<1>",
+        HeroIconString(ultimateHeroes[clampedIndex(currentIndex - EvaluateOnce(i + 1), ultimateHeroes.Length)].hero),
+        AbilityIconString(ultimateHeroes[clampedIndex(currentIndex - EvaluateOnce(i + 1), ultimateHeroes.Length)].hero, Button.Ultimate)>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance + (EvaluateOnce(i) + 0.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - EvaluateOnce(i) - outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+
+  # right side
+  for (i = 0; FILLERS_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      <"<0>\n\n<1>",
+        HeroIconString(ultimateHeroes[clampedIndex(currentIndex + EvaluateOnce(i + 1), ultimateHeroes.Length)].hero),
+        AbilityIconString(ultimateHeroes[clampedIndex(currentIndex + EvaluateOnce(i + 1), ultimateHeroes.Length)].hero, Button.Ultimate)>,
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraXAxis * SPIN_OFFSET_SCALAR * (outstandingAngularBalance - EvaluateOnce(i + 1.5))
+      ),
+      FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= FILLERS_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (FILLERS_EACH_SIDE - FADE_LENGTH - 1 - EvaluateOnce(i) + outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+}
+
+Number VERTICAL_WHEEL_SPACING: 0.5;
+Number VERTICAL_WHEEL_EACH_SIDE: 3;
+Number VERTICAL_SELECTION_SCALE: 2.5;
+Number VERTICAL_FILLER_SCALE: 2.25;
+Number VERTICAL_WHEEL_Y_OFFSET: 0.45;
+
+void CreateModifierWheel() "Create Modifier wheel" {
+  # main selection
+  wheelTexts.ModAppend(CreateInWorldText(
+    AllPlayers(),
+    modifiers[currentIndex],
+    UpdateEveryFrame(cameraPos
+      + WHEEL_DISPLAY_DISTANCE * cameraFacing
+      + cameraYAxis * VERTICAL_WHEEL_Y_OFFSET
+      + cameraYAxis * -VERTICAL_WHEEL_SPACING * (outstandingAngularBalance - 0.5)),
+    VERTICAL_SELECTION_SCALE,
+    Clipping.DoNotClip,
+    InworldTextRev.VisibleToPositionAndString,
+    Color.Yellow
+  ));
+
+  # down
+  for (i = 0; VERTICAL_WHEEL_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      modifiers[clampedIndex(currentIndex - EvaluateOnce(i + 1), modifiers.Length)],
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraYAxis * VERTICAL_WHEEL_Y_OFFSET
+        + cameraYAxis * -VERTICAL_WHEEL_SPACING * (outstandingAngularBalance + (EvaluateOnce(i) + 0.5))
+      ),
+      VERTICAL_FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= VERTICAL_WHEEL_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (VERTICAL_WHEEL_EACH_SIDE - FADE_LENGTH - EvaluateOnce(i) - outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+
+  # up
+  for (i = 0; VERTICAL_WHEEL_EACH_SIDE; 1) {
+    wheelTexts.ModAppend(CreateInWorldText(
+      AllPlayers(),
+      modifiers[clampedIndex(currentIndex + EvaluateOnce(i + 1), modifiers.Length)],
+      UpdateEveryFrame(cameraPos
+        + WHEEL_DISPLAY_DISTANCE * cameraFacing
+        + cameraYAxis * VERTICAL_WHEEL_Y_OFFSET
+        + cameraYAxis * -VERTICAL_WHEEL_SPACING * (outstandingAngularBalance - EvaluateOnce(i + 1.5))
+      ),
+      VERTICAL_FILLER_SCALE,
+      Clipping.DoNotClip,
+      InworldTextRev.VisibleToPositionStringAndColor,
+      i >= VERTICAL_WHEEL_EACH_SIDE - FADE_LENGTH
+        ? CustomColor(255,255,255,255 + (VERTICAL_WHEEL_EACH_SIDE - FADE_LENGTH - 1 - EvaluateOnce(i) + outstandingAngularBalance) * 255/FADE_LENGTH)
+        : Color.White
+    ));
+  }
+}
+
+rule: "[DEBUG] slow mo"
+Event.OngoingPlayer
+if (EventPlayer().IsButtonHeld(Button.Interact))
+{
+  SetSlowMotion(25);
+  WaitUntil(!EventPlayer().IsButtonHeld(Button.Interact), 1000000);
+  WaitUntil(EventPlayer().IsButtonHeld(Button.Interact), 1000000);
+  SetSlowMotion(100);
+}

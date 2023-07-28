@@ -1,0 +1,15 @@
+{
+  "Mode Name": "Hero Randomizer Wheel",
+  "Description": "Host player: Spin the wheel with Primary/Secondary Fire, and press Ability 1/2/Ultimate to bring up the respective wheels (Modifier is Interact).",
+  "Modes": {
+    "Skirmish": {
+      "Enabled Maps": [
+        "Workshop Expanse (Night)"
+      ]
+    }
+  },
+  "Extensions": {
+    "Buff and Debuff Sounds": true,
+    "Explosion Sounds": true
+  }
+}
