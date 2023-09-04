@@ -105,6 +105,7 @@
     "Bonus Health",
     "Heal",
     "Explosive Kills",
-    "Increase Projectile Speed"
+    "Increase Projectile Speed",
+    "Swap Hero On Kill"
   ]
 }
