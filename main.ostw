@@ -37,6 +37,7 @@ Number WheelTypeCountOf(Number wheelType): [0, CountOf(AllHeroes()), ability1Her
 
 globalvar WheelType currentWheel = WheelType.Hero;
 Player[] visibleToPlayersOnly(Boolean visibilityCondition = true): AllPlayers().Contains(LocalPlayer()) && visibilityCondition ? AllPlayers() : null;
+Boolean CanSwitchWheels(): [WheelState.SLOW_SPIN, WheelState.STOPPED].Contains(wheelState);
 
 rule: "global setup"
 {
@@ -118,7 +119,7 @@ rule: "global setup"
 
   # Previous wheel
   CreateInWorldText(
-    visibleToPlayersOnly(currentWheel > WheelType.Hero),
+    visibleToPlayersOnly(currentWheel > WheelType.Hero && CanSwitchWheels()),
     IconString(Icon.ArrowLeft),
     Math.WorldVectorForPositionWithPitch(Vector(-3 * 100, 100 * (0.1 - 0.2), 300), cameraPos, cameraFacing, true),
     Scale: 4,
@@ -128,7 +129,7 @@ rule: "global setup"
     Spectators.VisibleNever
   );
   CreateInWorldText(
-    visibleToPlayersOnly(currentWheel > WheelType.Hero),
+    visibleToPlayersOnly(currentWheel > WheelType.Hero && CanSwitchWheels()),
     WheelTypeName(<Number>currentWheel - 1),
     Math.WorldVectorForPositionWithPitch(Vector(-3 * 100, 100 * (-0.1 - 0.2), 300), cameraPos, cameraFacing, true),
     Scale: 2.5,
@@ -139,7 +140,7 @@ rule: "global setup"
   );
   # Next wheel
   CreateInWorldText(
-    visibleToPlayersOnly(currentWheel != WheelType.Modifier),
+    visibleToPlayersOnly(currentWheel != WheelType.Modifier && CanSwitchWheels()),
     IconString(Icon.ArrowRight),
     Math.WorldVectorForPositionWithPitch(Vector(3 * 100, 100 * (0.1 - 0.2), 300), cameraPos, cameraFacing, true),
     Scale: 4,
@@ -149,7 +150,7 @@ rule: "global setup"
     Spectators.VisibleNever
   );
   CreateInWorldText(
-    visibleToPlayersOnly(currentWheel != WheelType.Modifier),
+    visibleToPlayersOnly(currentWheel != WheelType.Modifier && CanSwitchWheels()),
     WheelTypeName(<Number>currentWheel + 1),
     Math.WorldVectorForPositionWithPitch(Vector(3 * 100, 100 * (-0.1 - 0.2), 300), cameraPos, cameraFacing, true),
     Scale: 2.5,
@@ -190,21 +191,16 @@ rule: "When primary fire pressed, start spinning the wheel"
 Event.OngoingGlobal
 if (HostPlayer().IsButtonHeld(Button.PrimaryFire))
 {
-  slowPanFlag = false;
-  currentAngularSpeed = 25;
-  frictionEnabled = false;
-  WaitUntil(!HostPlayer().IsButtonHeld(Button.PrimaryFire), 1);
-  randomSlowIndex = RandomInteger(0, ability1Heroes.Length - 1);
-  WaitUntil(currentIndex == randomSlowIndex, 2);
-  frictionEnabled = true;
+  wheelEvent = WheelEvent.START_SPIN;
+  DispatchWheelEvent();
 }
 
 rule: "When secondary fire pressed, immediately stop the wheel"
 Event.OngoingGlobal
 if (HostPlayer().IsButtonHeld(Button.SecondaryFire))
 {
-  SmallMessage(AllPlayers(), $" {IconString(Icon.Warning)}  Wheel was manually stopped");
-  currentAngularSpeed = 0;
+  wheelEvent = WheelEvent.MANUAL_STOP_SPIN;
+  DispatchWheelEvent();
 }
 
 rule: "When throttle left, select previous wheel"
@@ -212,6 +208,7 @@ Event.OngoingGlobal
 if (currentWheel > WheelType.Hero)
 if (XOf(ThrottleOf(HostPlayer())) > 0.5)
 {
+  AbortIf(!CanSwitchWheels());
   currentWheel--;
   async LoadNewWheel();
 }
@@ -221,6 +218,7 @@ Event.OngoingGlobal
 if (currentWheel < WheelType.Modifier)
 if (XOf(ThrottleOf(HostPlayer())) < -0.5)
 {
+  AbortIf(!CanSwitchWheels());
   currentWheel++;
   async LoadNewWheel();
 }
