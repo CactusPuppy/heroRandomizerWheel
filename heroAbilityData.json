@@ -94,7 +94,7 @@
     {"hero": {"hero": "Kiriko"},        "abilityName": "Kitsune Rush"},
     {"hero": {"hero": "Lifeweaver"},    "abilityName": "Tree of Life"},
     {"hero": {"hero": "Mercy"},         "abilityName": "Valkyrie"},
-    {"hero": {"hero": "Moira"},         "abilityName": "Moira"},
+    {"hero": {"hero": "Moira"},         "abilityName": "Coalescence"},
     {"hero": {"hero": "Zenyatta"},      "abilityName": "Transcendence"}
   ],
   "modifiers": [
