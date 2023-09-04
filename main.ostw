@@ -44,16 +44,19 @@ rule: "global setup"
   # Set some camera constants
   cameraXAxis = Math.WorldVectorForPositionWithPitch(Right(), cameraPos, cameraFacing, false);
   cameraYAxis = Math.WorldVectorForPositionWithPitch(Up(), cameraPos, cameraFacing, false);
-  LogToInspector(cameraPos);
-  LogToInspector(cameraFacing);
-  LogToInspector(cameraXAxis);
-  LogToInspector(cameraYAxis);
 
   WaitUntil(IsGameInProgress(), 10);
   PauseMatchTime();
   LoadNewWheel();
 
   # DEBUG
+  // CreateHudText(
+  //   AllPlayers(),
+  //   Text: $"State: {wheelState}                                                                              ",
+  //   Location: Location.Left,
+  //   Reevaluation: HudTextRev.VisibleToAndString,
+  //   SortOrder: 0
+  // );
   // CreateHudText(
   //   AllPlayers(),
   //   Text: $"Index: {currentIndex}                                                                              ",
@@ -621,7 +624,7 @@ void CreateModifierWheel() "Create Modifier wheel" {
   }
 }
 
-rule: "[DEBUG] slow mo"
+disabled rule: "[DEBUG] slow mo"
 Event.OngoingPlayer
 if (EventPlayer().IsButtonHeld(Button.Interact))
 {
