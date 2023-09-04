@@ -1,0 +1,254 @@
+import "main.ostw";
+
+enum WheelState {
+  SLOW_SPIN = "SLOW_SPIN",
+  NO_FRICTION = "NO_FRICTION",
+  FRICTION = "FRICTION",
+  SNAPPING = "SNAPPING",
+  STOPPED = "STOPPED"
+}
+
+enum WheelEvent {
+  NONE,
+  SWITCH_WHEEL,
+  START_SPIN,
+  BEGIN_SLOWDOWN,
+  MANUAL_STOP_SPIN,
+  SELF_STOP_SPIN
+}
+
+globalvar Number currentIndex;
+globalvar Number currentAngularSpeed;
+globalvar Number outstandingAngularBalance = 0.5;
+globalvar Number randomSlowIndex;
+globalvar Boolean frictionEnabled;
+globalvar Boolean slowPanFlag;
+
+globalvar WheelState wheelState = WheelState.SLOW_SPIN;
+globalvar WheelEvent wheelEvent = WheelEvent.NONE;
+
+Number ANGULAR_FRICTION: 0.5;
+Number MINIMUM_FRICTION_VELOCITY: 0.5;
+Number UPDATE_FREQUENCY: 0.032;
+Number EPSILON: 0.05;
+
+void DispatchWheelEvent() '[wheelSimulation.del] Dispatch a wheel event to the appropriate handler' {
+  WheelStateMachine();
+  wheelEvent = WheelEvent.NONE;
+}
+
+void WheelStateMachine() "[wheelSimulation.del] Wheel State Machine" {
+  switch (wheelState) {
+    case WheelState.SLOW_SPIN:
+      wheelState = HandleWheelEvent_SLOW_SPIN();
+      break;
+
+    case WheelState.NO_FRICTION:
+      wheelState = HandleWheelEvent_NO_FRICTION();
+      break;
+
+    case WheelState.FRICTION:
+      wheelState = HandleWheelEvent_FRICTION();
+      break;
+
+    case WheelState.SNAPPING:
+      wheelState = HandleWheelEvent_SNAPPING();
+      break;
+
+    case WheelState.STOPPED:
+      wheelState = HandleWheelEvent_STOPPED();
+      break;
+
+    default:
+  }
+}
+
+WheelState HandleWheelEvent_SLOW_SPIN() "[wheelSimulation.del] Handle a wheel event in SLOW_SPIN state" {
+  switch (wheelEvent) {
+    case WheelEvent.START_SPIN:
+      currentAngularSpeed = 25;
+      StopChasingVariable(outstandingAngularBalance);
+      ChaseVariableAtRate(outstandingAngularBalance, 100, currentAngularSpeed, RateChaseReevaluation.DestinationAndRate);
+
+      randomSlowIndex = RandomInteger(0, WheelTypeCountOf(<Number>currentWheel));
+
+      return WheelState.NO_FRICTION;
+
+    case WheelEvent.MANUAL_STOP_SPIN:
+      StopChasingVariable(outstandingAngularBalance);
+      SmallMessage(AllPlayers(), $" {IconString(Icon.Warning)}  Slow spin stopped");
+
+      StartSnapping();
+      return WheelState.SNAPPING;
+
+    case WheelEvent.SWITCH_WHEEL:
+      currentIndex = 0;
+      outstandingAngularBalance = 0;
+      StopChasingVariable(outstandingAngularBalance);
+      ChaseVariableAtRate(outstandingAngularBalance, 100, 0.67, RateChaseReevaluation.None);
+      async ForceBalanceResync();
+      return WheelState.SLOW_SPIN;
+
+    default:
+      return wheelState;
+  }
+}
+
+WheelState HandleWheelEvent_NO_FRICTION() "[wheelSimulation.del] Handle a wheel event in NO_FRICTION state" {
+  switch (wheelEvent) {
+    case WheelEvent.BEGIN_SLOWDOWN:
+      # We have to pull this number out of the chase because otherwise the client and server will disagree.
+      Number randomScalar = RandomReal(0.8, 1.2);
+      ChaseVariableAtRate(currentAngularSpeed, 0, randomScalar * ANGULAR_FRICTION * Max(currentAngularSpeed, MINIMUM_FRICTION_VELOCITY), RateChaseReevaluation.DestinationAndRate);
+
+      return WheelState.FRICTION;
+
+    case WheelEvent.MANUAL_STOP_SPIN:
+      SmallMessage(AllPlayers(), $" {IconString(Icon.Warning)}  Wheel was manually stopped");
+      currentAngularSpeed = 0;
+      StopChasingVariable(outstandingAngularBalance);
+
+      StartSnapping();
+      return WheelState.SNAPPING;
+
+    default:
+      return wheelState;
+  }
+}
+
+WheelState HandleWheelEvent_FRICTION() "[wheelSimulation.del] Handle a wheel event in FRICTION state" {
+  switch (wheelEvent) {
+    case WheelEvent.MANUAL_STOP_SPIN:
+      SmallMessage(AllPlayers(), $" {IconString(Icon.Warning)}  Wheel was manually stopped");
+    case WheelEvent.SELF_STOP_SPIN:
+      StopChasingVariable(currentAngularSpeed);
+      currentAngularSpeed = 0;
+      StopChasingVariable(outstandingAngularBalance);
+
+      StartSnapping();
+      return WheelState.SNAPPING;
+
+    default:
+      return wheelState;
+  }
+}
+
+WheelState HandleWheelEvent_SNAPPING() "[wheelSimulation.del] Handle a wheel event in SNAPPING state" {
+  switch (wheelEvent) {
+    case WheelEvent.SELF_STOP_SPIN:
+      StopChasingVariable(outstandingAngularBalance);
+      return WheelState.STOPPED;
+
+    default:
+      return wheelState;
+  }
+}
+
+WheelState HandleWheelEvent_STOPPED() "[wheelSimulation.del] Handle a wheel event in STOPPED state" {
+  switch (wheelEvent) {
+    case WheelEvent.START_SPIN:
+      currentAngularSpeed = 25;
+      StopChasingVariable(outstandingAngularBalance);
+      ChaseVariableAtRate(outstandingAngularBalance, 100, currentAngularSpeed, RateChaseReevaluation.DestinationAndRate);
+
+      randomSlowIndex = RandomInteger(0, WheelTypeCountOf(<Number>currentWheel));
+
+      return WheelState.NO_FRICTION;
+
+    case WheelEvent.SWITCH_WHEEL:
+      currentIndex = 0;
+      outstandingAngularBalance = 0;
+      ChaseVariableAtRate(outstandingAngularBalance, 100, 0.67, RateChaseReevaluation.None);
+      async ForceBalanceResync();
+
+      return WheelState.SLOW_SPIN;
+    default:
+      return wheelState;
+  }
+}
+
+void StartSnapping() "[wheelSimulation.del] Start snapping wheel to closest selection" {
+  Wait(0.2);
+  StopChasingVariable(outstandingAngularBalance);
+  ChaseVariableAtRate(outstandingAngularBalance, 0.5, 2 * 2 * AbsoluteValue(0.5 - outstandingAngularBalance), RateChaseReevaluation.DestinationAndRate);
+}
+
+rule: "[wheelSimulation.del] When wheel is in the NO_FRICTION state, wait until the randomSlowIndex is reached to enter FRICTION state"
+if (wheelState == WheelState.NO_FRICTION)
+{
+  WaitUntil(currentIndex == randomSlowIndex || wheelState != WheelState.NO_FRICTION, 4);
+  AbortIf(wheelState != WheelState.NO_FRICTION);
+
+  wheelEvent = WheelEvent.BEGIN_SLOWDOWN;
+  DispatchWheelEvent();
+}
+
+rule: "[wheelSimulation.del] When wheel is in FRICTION state and currentAngularSpeed is 0, dispatch STOP_SPIN to move to SNAPPING"
+if (wheelState == WheelState.FRICTION)
+if (currentAngularSpeed == 0)
+{
+  wheelEvent = WheelEvent.SELF_STOP_SPIN;
+  DispatchWheelEvent();
+}
+
+rule: "[wheelSimulation.del] When snapping is done, STOP_SPIN again to fully stop wheel"
+if (wheelState == WheelState.SNAPPING)
+if (AbsoluteValue(outstandingAngularBalance - 0.5) < 0.005)
+{
+  wheelEvent = WheelEvent.SELF_STOP_SPIN;
+  DispatchWheelEvent();
+}
+
+rule: "[wheelSimulation.del] Process ticking over to a new selection"
+if (wheelState != WheelState.STOPPED)
+{
+  if (outstandingAngularBalance >= 1) {
+    currentIndex += RoundToInteger(outstandingAngularBalance, Rounding.Down);
+    outstandingAngularBalance = outstandingAngularBalance % 1;
+
+    if (wheelState != WheelState.SLOW_SPIN) {
+      PlayEffect(AllPlayers(), PlayEffect.Soldier76SprintStartSound, Color.White, cameraPos, 200);
+      PlayEffect(AllPlayers(), PlayEffect.DvaMicroMissilesExplosionSound, Color.White, cameraPos, 10);
+    }
+    ClampWheelIndex();
+  }
+  MinWait();
+  LoopIfConditionIsTrue();
+}
+
+void ForceBalanceResync() "[wheelSimulation.del] Force client-server resync of outstandingAngularBalance" {
+  Wait(0.064);
+  // OSTW pls no optimize thx :)
+  outstandingAngularBalance = outstandingAngularBalance + 0;
+}
+
+void ClampWheelIndex() "[wheelSimulation.del] Clamp wheel index"
+{
+  Number tempWheelCountOf = WheelTypeCountOf(<Number>currentWheel);
+  if (currentIndex >= tempWheelCountOf) currentIndex = currentIndex % tempWheelCountOf;
+
+  // if (currentWheel == WheelType.Hero) {
+  //   if (currentIndex >= AllHeroes().Length) currentIndex = currentIndex % AllHeroes().Length;
+  //   return;
+  // }
+
+  // if (currentWheel == WheelType.Ability1) {
+  //   if (currentIndex >= ability1Heroes.Length) currentIndex = currentIndex % ability1Heroes.Length;
+  //   return;
+  // }
+
+  // if (currentWheel == WheelType.Ability2) {
+  //   if (currentIndex >= ability2Heroes.Length) currentIndex = currentIndex % ability2Heroes.Length;
+  //   return;
+  // }
+
+  // if (currentWheel == WheelType.Ultimate) {
+  //   if (currentIndex >= ultimateHeroes.Length) currentIndex = currentIndex % ultimateHeroes.Length;
+  //   return;
+  // }
+
+  // if (currentWheel == WheelType.Modifier) {
+  //   if (currentIndex >= modifiers.Length) currentIndex = currentIndex % modifiers.Length;
+  //   return;
+  // }
+}

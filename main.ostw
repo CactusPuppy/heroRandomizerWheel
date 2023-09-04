@@ -8,13 +8,6 @@ globalvar HeroAbility[] ability2Heroes = import("heroAbilityData.json").ability2
 globalvar HeroAbility[] ultimateHeroes = import("heroAbilityData.json").ultimateHeroes;
 globalvar String[] modifiers = import("heroAbilityData.json").modifiers;
 
-globalvar Number currentIndex;
-globalvar Number currentAngularSpeed;
-globalvar Number outstandingAngularBalance = 0.5;
-globalvar Number randomSlowIndex;
-globalvar Boolean frictionEnabled;
-globalvar Boolean slowPanFlag;
-
 globalvar Vector cameraPos = Up() * 3;
 globalvar Vector cameraFacing = Normalize(Forward() + 0.085 * Down());
 globalvar Vector cameraXAxis;
@@ -36,7 +29,11 @@ enum WheelType {
   Ultimate,
   Modifier
 }
+
+import "wheelSimulation.del";
+
 String WheelTypeName(Number wheelType): ["", "Hero", "Ability 1", "Ability 2", "Ultimate", "Modifier"][<Number>wheelType + 1];
+Number WheelTypeCountOf(Number wheelType): [0, CountOf(AllHeroes()), ability1Heroes.Length, ability2Heroes.Length, ultimateHeroes.Length, modifiers.Length][wheelType + 1];
 
 globalvar WheelType currentWheel = WheelType.Hero;
 Player[] visibleToPlayersOnly(Boolean visibilityCondition = true): AllPlayers().Contains(LocalPlayer()) && visibilityCondition ? AllPlayers() : null;
@@ -235,9 +232,9 @@ void LoadNewWheel() "Load new wheel visuals"
     DestroyInWorldText(textId);
   }
   wheelTexts = [];
-  slowPanFlag = true;
-  currentIndex = 0;
-  outstandingAngularBalance = 0;
+
+  wheelEvent = WheelEvent.SWITCH_WHEEL;
+  DispatchWheelEvent();
 
   if (currentWheel == WheelType.Hero) {
     CreateHeroWheel();
@@ -259,110 +256,6 @@ void LoadNewWheel() "Load new wheel visuals"
 
   if (currentWheel == WheelType.Modifier) {
     CreateModifierWheel();
-  }
-
-  # Force client to re-sync balance
-  Wait(0.064);
-  outstandingAngularBalance = outstandingAngularBalance;
-}
-
-Number ANGULAR_FRICTION: 0.5;
-Number MINIMUM_FRICTION_VELOCITY: 0.5;
-Number UPDATE_FREQUENCY: 0.032;
-Number EPSILON: 0.05;
-
-rule: "Wheel index calculations"
-if (currentAngularSpeed > 0)
-{
-  // outstandingAngularBalance += currentAngularSpeed * UPDATE_FREQUENCY;
-  // Wait(UPDATE_FREQUENCY, WaitBehavior.AbortWhenFalse);
-  // Loop();
-
-  ChaseVariableAtRate(outstandingAngularBalance, 100, currentAngularSpeed, RateChaseReevaluation.DestinationAndRate);
-}
-
-globalvar Any spinSoundEffect;
-
-rule: "Process ticking over to a new section"
-# We need to loop instead of using a condition because Workshop bugs
-if (currentAngularSpeed > 0)
-{
-  if (outstandingAngularBalance >= 1) {
-    currentIndex += RoundToInteger(outstandingAngularBalance, Rounding.Down);
-    outstandingAngularBalance = outstandingAngularBalance % 1;
-
-    if (!slowPanFlag) {
-      PlayEffect(AllPlayers(), PlayEffect.Soldier76SprintStartSound, Color.White, cameraPos, 200);
-      PlayEffect(AllPlayers(), PlayEffect.DvaMicroMissilesExplosionSound, Color.White, cameraPos, 10);
-    }
-    ClampWheelIndex();
-  }
-
-  MinWait();
-  LoopIfConditionIsTrue();
-}
-
-rule: "Slow angular speed down every tick"
-if (frictionEnabled)
-if (currentAngularSpeed > 0)
-{
-  # We have to pull this number out of the chase because otherwise the client and server will disagree.
-  Number randomScalar = RandomReal(0.8, 1.2);
-  ChaseVariableAtRate(currentAngularSpeed, 0, (frictionEnabled ? randomScalar : 0) * ANGULAR_FRICTION * Max(currentAngularSpeed, MINIMUM_FRICTION_VELOCITY), RateChaseReevaluation.DestinationAndRate);
-  WheelType tempWheelType = currentWheel;
-  WaitUntil(currentAngularSpeed < EPSILON || currentWheel != tempWheelType, 60);
-  AbortIf(tempWheelType != currentWheel);
-  currentAngularSpeed = 0;
-  StopChasingVariable(currentAngularSpeed);
-}
-
-rule: "When spin is complete, snap the wheel to the selected choice"
-if (currentAngularSpeed > 0)
-{
-  WaitUntil(currentAngularSpeed == 0, 1000);
-  StopChasingVariable(currentAngularSpeed);
-  Wait(0.2, WaitBehavior.RestartWhenTrue);
-  StopChasingVariable(outstandingAngularBalance);
-  ChaseVariableAtRate(outstandingAngularBalance, 0.5, 2 * 2 * AbsoluteValue(0.5 - outstandingAngularBalance), RateChaseReevaluation.DestinationAndRate);
-  WaitUntil(AbsoluteValue(outstandingAngularBalance - 0.5) < 0.005 || currentAngularSpeed > 0, 2);
-  LoopIfConditionIsTrue();
-  StopChasingVariable(outstandingAngularBalance);
-}
-
-rule: "If slowPanFlag is enabled, set a slow angular speed and disable friction"
-if (slowPanFlag)
-{
-  MinWait();
-  AbortIfConditionIsFalse();
-  frictionEnabled = false;
-  currentAngularSpeed = 0.67;
-}
-
-void ClampWheelIndex() "[SUB] Clamp wheel index"
-{
-  if (currentWheel == WheelType.Hero) {
-    if (currentIndex >= AllHeroes().Length) currentIndex = currentIndex % AllHeroes().Length;
-    return;
-  }
-
-  if (currentWheel == WheelType.Ability1) {
-    if (currentIndex >= ability1Heroes.Length) currentIndex = currentIndex % ability1Heroes.Length;
-    return;
-  }
-
-  if (currentWheel == WheelType.Ability2) {
-    if (currentIndex >= ability2Heroes.Length) currentIndex = currentIndex % ability2Heroes.Length;
-    return;
-  }
-
-  if (currentWheel == WheelType.Ultimate) {
-    if (currentIndex >= ultimateHeroes.Length) currentIndex = currentIndex % ultimateHeroes.Length;
-    return;
-  }
-
-  if (currentWheel == WheelType.Modifier) {
-    if (currentIndex >= modifiers.Length) currentIndex = currentIndex % modifiers.Length;
-    return;
   }
 }
 
